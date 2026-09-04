@@ -1,0 +1,229 @@
+import { o as __toESM } from "../_runtime.mjs";
+import { ct as arrayType, dt as numberType, ft as objectType, lt as booleanType, pt as stringType } from "../_libs/@ai-sdk/gateway+[...].mjs";
+import { c as createServerFn } from "./createServerFn-BFFE07zL.mjs";
+import { t as requireSupabaseAuth } from "./auth-middleware-BwdutfJC.mjs";
+import { t as createServerRpc } from "./createServerRpc-MBa5GZ-L.mjs";
+import { n as generateText, r as output_exports, t as NoObjectGeneratedError } from "../_libs/ai.mjs";
+import { t as createGoogle } from "../_libs/@ai-sdk/google+[...].mjs";
+import { n as getDocumentProxy, t as extractText } from "../_libs/unpdf.mjs";
+import { t as require_lib } from "../_libs/mammoth+[...].mjs";
+import processModule from "node:process";
+import { Buffer } from "node:buffer";
+//#region node_modules/.nitro/vite/services/ssr/assets/resume.functions-CFLTKR-i.js
+var import_lib = /* @__PURE__ */ __toESM(require_lib());
+var AnalyzeInput = objectType({
+	resumeId: stringType().uuid(),
+	targetRole: stringType().min(1).max(200)
+});
+var AnalysisSchema = objectType({
+	is_resume: booleanType().optional().default(true),
+	overall_score: numberType().optional().default(0),
+	ats_score: numberType().optional().default(0),
+	readiness_percent: numberType().optional().default(0),
+	knowledge_remaining_percent: numberType().optional().default(100),
+	estimated_learning_weeks: numberType().optional().default(0),
+	readiness_verdict: stringType().optional().default(""),
+	summary: stringType().optional().default(""),
+	skills: arrayType(objectType({
+		name: stringType(),
+		level: stringType()
+	})).optional().default([]),
+	strengths: arrayType(stringType()).optional().default([]),
+	gaps: arrayType(objectType({
+		skill: stringType(),
+		why_it_matters: stringType().optional().default(""),
+		hours_to_learn: numberType().optional().default(0),
+		priority: stringType().optional().default("medium")
+	})).optional().default([]),
+	salary_estimate: objectType({
+		currency: stringType().optional().default("USD"),
+		min: numberType().optional().default(0),
+		max: numberType().optional().default(0),
+		region: stringType().optional().default("United States")
+	}).optional().default({
+		currency: "USD",
+		min: 0,
+		max: 0,
+		region: "United States"
+	})
+});
+function extractJsonObject(text) {
+	if (!text) return {};
+	let t = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "");
+	const start = t.indexOf("{");
+	const end = t.lastIndexOf("}");
+	if (start >= 0 && end > start) t = t.slice(start, end + 1);
+	return JSON.parse(t);
+}
+async function extractResumeText(bytes, mime, filename) {
+	const lowerName = filename.toLowerCase();
+	if (mime === "application/pdf" || lowerName.endsWith(".pdf")) {
+		const { text } = await extractText(await getDocumentProxy(bytes), { mergePages: true });
+		return Array.isArray(text) ? text.join("\n\n") : String(text ?? "");
+	}
+	if (lowerName.endsWith(".docx") || lowerName.endsWith(".doc") || mime.includes("wordprocessingml") || mime.includes("msword")) try {
+		const result = await import_lib.extractRawText({ buffer: Buffer.from(bytes) });
+		if (result.value && result.value.trim().length > 0) return result.value;
+	} catch {}
+	return new TextDecoder().decode(bytes);
+}
+var listResumes_createServerFn_handler = createServerRpc({
+	id: "b288288ab2fbfc0ca7181e1a97e7dfa0595009975ab09c38712ba7388546face",
+	name: "listResumes",
+	filename: "src/lib/resume.functions.ts"
+}, (opts) => listResumes.__executeServer(opts));
+var listResumes = createServerFn({ method: "GET" }).middleware([requireSupabaseAuth]).handler(listResumes_createServerFn_handler, async ({ context }) => {
+	const { data, error } = await context.supabase.from("resumes").select("id, original_filename, mime_type, size_bytes, created_at").order("created_at", { ascending: false });
+	if (error) throw new Error(error.message);
+	return data ?? [];
+});
+var listAnalyses_createServerFn_handler = createServerRpc({
+	id: "10c59102619478e7d9a08d3812524bf00585dc739f91ea6cb1ec99e666fc217d",
+	name: "listAnalyses",
+	filename: "src/lib/resume.functions.ts"
+}, (opts) => listAnalyses.__executeServer(opts));
+var listAnalyses = createServerFn({ method: "GET" }).middleware([requireSupabaseAuth]).handler(listAnalyses_createServerFn_handler, async ({ context }) => {
+	const { data, error } = await context.supabase.from("resume_analyses").select("*").order("created_at", { ascending: false }).limit(10);
+	if (error) throw new Error(error.message);
+	return data ?? [];
+});
+var analyzeResume_createServerFn_handler = createServerRpc({
+	id: "c8f61b0afaae08e817dcd91bcf0654257dcb701d1ab06bf9bf2b1159856e40ce",
+	name: "analyzeResume",
+	filename: "src/lib/resume.functions.ts"
+}, (opts) => analyzeResume.__executeServer(opts));
+var analyzeResume = createServerFn({ method: "POST" }).middleware([requireSupabaseAuth]).inputValidator((input) => AnalyzeInput.parse(input)).handler(analyzeResume_createServerFn_handler, async ({ data, context }) => {
+	const apiKey = processModule.env.GOOGLE_GENERATIVE_AI_API_KEY;
+	if (!apiKey) throw new Error("AI is not configured.");
+	const { data: resume, error: resumeErr } = await context.supabase.from("resumes").select("id, storage_path, mime_type, original_filename, extracted_text").eq("id", data.resumeId).single();
+	if (resumeErr || !resume) throw new Error("Resume not found.");
+	let text = resume.extracted_text;
+	if (!text) {
+		const { data: fileBlob, error: dlErr } = await context.supabase.storage.from("resumes").download(resume.storage_path);
+		if (dlErr || !fileBlob) throw new Error("Could not read your resume file.");
+		text = await extractResumeText(new Uint8Array(await fileBlob.arrayBuffer()), resume.mime_type, resume.original_filename);
+		await context.supabase.from("resumes").update({ extracted_text: text }).eq("id", resume.id);
+	}
+	const cleaned = (text ?? "").replace(/\s+/g, " ").trim();
+	if (cleaned.length < 120) throw new Error("We couldn't read enough text from this file. Please upload a text-based PDF/DOCX resume (not a scanned image).");
+	const resumeSignals = [
+		"experience",
+		"education",
+		"skills",
+		"project",
+		"work",
+		"university",
+		"college",
+		"degree",
+		"curriculum vitae",
+		"resume",
+		"employment",
+		"bachelor",
+		"master",
+		"phd",
+		"engineer",
+		"developer",
+		"manager",
+		"intern",
+		"certifications",
+		"contact",
+		"summary"
+	];
+	const lowerText = cleaned.toLowerCase();
+	if (resumeSignals.reduce((n, s) => lowerText.includes(s) ? n + 1 : n, 0) < 3) throw new Error("Please upload only a valid resume. Non-resume documents cannot be analyzed.");
+	const trimmed = cleaned.slice(0, 2e4);
+	const model = createGoogle({ apiKey })("gemini-3.5-flash");
+	const prompt = `You are a strict, expert AI document verifier and recruiter. 
+
+STEP 1: Document Verification
+Thoroughly scan the text below. Determine if this document is a genuine Candidate Resume, CV, or Professional Profile (which must contain an individual's personal work history, professional experience, technical/job skills, or personal projects).
+
+If the document is ANY OTHER DOCUMENT TYPE — including:
+- School marksheets, 10th/12th grade report cards, or grade sheets
+- Academic transcripts, diplomas, or degree certificates
+- Invoices, bills, receipts, or financial statements
+- Research papers, essays, articles, or book chapters
+- Government IDs, birth certificates, or legal contracts
+- Programming problem statements, assignments, or random text
+
+YOU MUST SET "is_resume": false.
+
+STEP 2: Resume Analysis (only if it is a resume)
+Evaluate the candidate's experience against the target role: "${data.targetRole}". Extract skills, ATS parseability score, strengths, and missing skill gaps based ONLY on explicit evidence in the text.
+
+Return ONLY a valid JSON object matching this schema:
+{
+  "is_resume": boolean (true ONLY if this is a candidate resume/CV, false if it is any other document),
+  "overall_score": number 0-100,
+  "ats_score": number 0-100,
+  "readiness_percent": number 0-100,
+  "knowledge_remaining_percent": number 0-100,
+  "estimated_learning_weeks": number,
+  "readiness_verdict": string (one clear sentence),
+  "summary": string (2-3 sentences summarizing background for target role),
+  "skills": [{ "name": string, "level": "beginner"|"intermediate"|"advanced"|"expert" }],
+  "strengths": [string],
+  "gaps": [{ "skill": string, "why_it_matters": string, "hours_to_learn": number, "priority": "critical"|"high"|"medium"|"low" }],
+  "salary_estimate": { "currency": string, "min": number, "max": number, "region": string }
+}
+
+DOCUMENT TEXT:
+"""
+${trimmed}
+"""`;
+	let parsed;
+	try {
+		const { text: raw } = await generateText({
+			model,
+			prompt
+		});
+		parsed = AnalysisSchema.parse(extractJsonObject(raw));
+	} catch (error) {
+		try {
+			const { output } = await generateText({
+				model,
+				output: output_exports.object({ schema: AnalysisSchema }),
+				prompt
+			});
+			parsed = output;
+		} catch (err) {
+			if (NoObjectGeneratedError.isInstance(err)) try {
+				parsed = AnalysisSchema.parse(extractJsonObject(err.text ?? "{}"));
+			} catch {
+				throw new Error("AI could not analyze this resume reliably. Please try again in a moment.");
+			}
+			else throw err;
+		}
+	}
+	if (parsed.is_resume === false) throw new Error("Invalid Document: The uploaded file is not a resume or CV. Please upload a valid resume.");
+	const { data: inserted, error: insErr } = await context.supabase.from("resume_analyses").insert({
+		user_id: context.userId,
+		resume_id: resume.id,
+		target_role: data.targetRole,
+		overall_score: Math.round(parsed.overall_score),
+		ats_score: Math.round(parsed.ats_score),
+		summary: parsed.summary,
+		skills: parsed.skills,
+		strengths: parsed.strengths,
+		gaps: parsed.gaps,
+		salary_estimate: parsed.salary_estimate,
+		raw: parsed
+	}).select().single();
+	if (insErr) throw new Error(insErr.message);
+	return inserted;
+});
+var DeleteInput = objectType({ resumeId: stringType().uuid() });
+var deleteResume_createServerFn_handler = createServerRpc({
+	id: "b770062f53397f87339e19e0ecab926a5a29badd155b20f722f317084c9c2140",
+	name: "deleteResume",
+	filename: "src/lib/resume.functions.ts"
+}, (opts) => deleteResume.__executeServer(opts));
+var deleteResume = createServerFn({ method: "POST" }).middleware([requireSupabaseAuth]).inputValidator((input) => DeleteInput.parse(input)).handler(deleteResume_createServerFn_handler, async ({ data, context }) => {
+	const { data: resume } = await context.supabase.from("resumes").select("storage_path").eq("id", data.resumeId).single();
+	if (resume?.storage_path) await context.supabase.storage.from("resumes").remove([resume.storage_path]);
+	const { error } = await context.supabase.from("resumes").delete().eq("id", data.resumeId);
+	if (error) throw new Error(error.message);
+	return { success: true };
+});
+//#endregion
+export { analyzeResume_createServerFn_handler, deleteResume_createServerFn_handler, listAnalyses_createServerFn_handler, listResumes_createServerFn_handler };

@@ -112,7 +112,7 @@ async function generateRoadmapInternal(context: { supabase: any; userId: string 
   const strengths = JSON.stringify(latestAnalysis.strengths || []);
 
   const googleProvider = createGoogleGenerativeAI({ apiKey });
-  const model = googleProvider("gemini-3.5-flash");
+  const model = googleProvider("gemini-1.5-flash");
 
   const prompt = `You are a principal technical mentor and curriculum architect. Create a highly customized, prioritized learning roadmap for a candidate targeting the role of "${targetRole}".
 

@@ -45,7 +45,7 @@ export const generateMockTest = createServerFn({ method: "POST" })
     if (!apiKey) throw new Error("AI is not configured.");
 
     const googleProvider = createGoogleGenerativeAI({ apiKey });
-    const model = googleProvider("gemini-3.5-flash");
+    const model = googleProvider("gemini-1.5-flash");
 
     const prompt = `Generate a mock interview test for a candidate targeting the role: "${data.targetRole}".
 Round: ${data.round.toUpperCase()}.
@@ -185,7 +185,7 @@ export const generateLiveQuestion = createServerFn({ method: "POST" })
     }
 
     const googleProvider = createGoogleGenerativeAI({ apiKey });
-    const model = googleProvider("gemini-3.5-flash");
+    const model = googleProvider("gemini-1.5-flash");
 
     const prompt = `You are a principal technical interviewer and senior HR partner. Ask ONE direct, realistic, open-ended interview question to a candidate.
 
@@ -246,7 +246,7 @@ export const evaluateLiveAnswer = createServerFn({ method: "POST" })
     if (!apiKey) throw new Error("AI is not configured.");
 
     const googleProvider = createGoogleGenerativeAI({ apiKey });
-    const model = googleProvider("gemini-3.5-flash");
+    const model = googleProvider("gemini-1.5-flash");
 
     const prompt = `Evaluate candidate's response to an interview question.
 

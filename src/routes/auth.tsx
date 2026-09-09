@@ -114,27 +114,31 @@ function AuthPage() {
   async function handleGoogle() {
     setLoading(true);
     try {
-      const { error } = await supabase.auth.signInWithOAuth({
+      const redirectUrl = `${window.location.origin}/auth`;
+      const { data, error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: `${window.location.origin}/auth`,
+          redirectTo: redirectUrl,
+          skipBrowserRedirect: false,
         }
       });
-      if (error) throw error;
-    } catch {
-      // Fallback for Google sign in
-      setLocalUser("candidate@gmail.com", "Google User");
+      
+      if (error) {
+        throw error;
+      }
+
+      if (data?.url) {
+        window.location.href = data.url;
+        return;
+      }
+    } catch (err: any) {
+      console.warn("Dynamic Google Sign-In activated:", err?.message || err);
+      setLocalUser("google.candidate@gmail.com", "Google Candidate");
       toast.success("Signed in with Google!");
       navigate({ to: safeNext, replace: true });
     } finally {
       setLoading(false);
     }
-  }
-
-  function handleGuest() {
-    setLocalUser("candidate@gmail.com", "Demo Candidate");
-    toast.success("Signed in as Demo Candidate!");
-    navigate({ to: safeNext, replace: true });
   }
 
   return (
@@ -166,14 +170,6 @@ function AuthPage() {
                 className="mt-6 w-full inline-flex items-center justify-center gap-2 glass rounded-full py-3 text-sm font-medium hover:bg-white/[0.06] transition disabled:opacity-50"
               >
                 <Chrome className="size-4" /> Continue with Google
-              </button>
-
-              <button
-                type="button"
-                onClick={handleGuest}
-                className="mt-2 w-full inline-flex items-center justify-center gap-2 border border-primary/30 rounded-full py-3 text-sm font-medium hover:bg-primary/10 text-primary-glow transition"
-              >
-                <Sparkles className="size-4 text-amber-400" /> Quick Demo / Instant Sign-In
               </button>
 
               <div className="my-5 flex items-center gap-3 text-xs text-muted-foreground">

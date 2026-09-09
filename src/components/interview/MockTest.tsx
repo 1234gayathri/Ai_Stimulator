@@ -22,7 +22,13 @@ interface MockTestProps {
 }
 
 export function MockTest({ round = "technical", defaultRole = "Software Engineer", autoStartKey }: MockTestProps) {
-  const [targetRole, setTargetRole] = useState(defaultRole);
+  const [targetRole, setTargetRole] = useState(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("target_role");
+      if (saved && saved.trim()) return saved.trim();
+    }
+    return defaultRole;
+  });
   const [difficulty, setDifficulty] = useState<"easy" | "medium" | "hard">("medium");
   const [questions, setQuestions] = useState<MockQuestion[]>([]);
   const [answers, setAnswers] = useState<number[]>([]);

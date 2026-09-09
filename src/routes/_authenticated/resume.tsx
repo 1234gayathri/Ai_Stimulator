@@ -39,7 +39,13 @@ function ResumePage() {
 
   const analyzeM = useMutation({
     mutationFn: (resumeId: string) => analyzeFn({ data: { resumeId, targetRole } }),
-    onSuccess: () => {
+    onSuccess: (data) => {
+      if (typeof window !== "undefined") {
+        localStorage.setItem("target_role", targetRole);
+        if (data) {
+          localStorage.setItem("latest_resume_analysis", JSON.stringify(data));
+        }
+      }
       toast.success("Analysis complete!", {
         description: "Your resume indexing and skill analysis are ready.",
         action: {

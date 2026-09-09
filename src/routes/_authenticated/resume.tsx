@@ -90,6 +90,20 @@ function ResumePage() {
       });
       return;
     }
+
+    // Pre-check for non-resume filenames
+    const nonResumeKeywords = [
+      "marksheet", "transcript", "invoice", "receipt", "bill", "certificate", 
+      "admit", "hallticket", "passport", "pan_card", "aadhaar", "assignment", 
+      "homework", "pay_slip", "payslip", "bank_statement", "offer_letter"
+    ];
+    const isNonResumeFile = nonResumeKeywords.some((kw) => name.includes(kw));
+    if (isNonResumeFile) {
+      toast.error("Invalid Document: Not a Resume", {
+        description: "Please upload a candidate Resume or CV document only (marksheets, certificates, and invoices are not allowed).",
+      });
+      return;
+    }
     if (file.size === 0) {
       toast.error("This file appears to be empty", { description: "Upload a valid resume file." });
       return;

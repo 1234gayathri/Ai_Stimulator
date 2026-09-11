@@ -12,7 +12,7 @@ const AnalyzeInput = z.object({
 });
 
 const AnalyzeLocalInput = z.object({
-  fileBytes: z.array(z.number()),
+  fileBase64: z.string(),   // base64-encoded file content
   mimeType: z.string(),
   filename: z.string(),
   targetRole: z.string().min(1).max(200),
@@ -354,13 +354,15 @@ function computeGenuineSalaryFallback(
  * and returns the analysis result WITHOUT touching Supabase storage or DB.
  */
 export const analyzeResumeLocal = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) => AnalyzeLocalInput.parse(input))
   .handler(async ({ data }) => {
     const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
     if (!apiKey) throw new Error("AI is not configured.");
 
-    const bytes = new Uint8Array(data.fileBytes);
-    let text = await extractResumeText(bytes, data.mimeType, data.filename);
+    // Decode base64 file back to bytes
+    const bytes = new Uint8Array(Buffer.from(data.fileBase64, "base64"));
+    const text = await extractResumeText(bytes, data.mimeType, data.filename);
 
     const cleaned = (text ?? "").replace(/\s+/g, " ").trim();
     if (cleaned.length < 120) {

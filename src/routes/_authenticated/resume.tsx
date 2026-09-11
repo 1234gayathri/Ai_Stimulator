@@ -94,12 +94,23 @@ function ResumePage() {
     },
   });
 
-  // Local mutation: reads file → sends text to server → stores result in localStorage
+  // Local mutation: reads file → base64 encodes → sends to server → stores result in localStorage
   const analyzeLocalM = useMutation({
     mutationFn: async ({ file, role }: { file: File; role: string }) => {
-      const arrayBuf = await file.arrayBuffer();
-      const bytes = Array.from(new Uint8Array(arrayBuf));
-      return analyzeLocalFn({ data: { fileBytes: bytes, mimeType: file.type || "application/pdf", filename: file.name, targetRole: role } });
+      // Convert file to base64 string (avoids huge JSON byte array)
+      const fileBase64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = reader.result as string;
+          // Strip the data:...;base64, prefix
+          resolve(result.split(",")[1] ?? result);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      return analyzeLocalFn({
+        data: { fileBase64, mimeType: file.type || "application/pdf", filename: file.name, targetRole: role },
+      });
     },
     onSuccess: (data) => {
       if (typeof window !== "undefined") {

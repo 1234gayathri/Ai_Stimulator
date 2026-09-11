@@ -9,6 +9,7 @@ import { Nav } from "@/components/site/Nav";
 import { Footer } from "@/components/site/Footer";
 import { WorkflowStepper } from "@/components/site/WorkflowStepper";
 import { supabase } from "@/integrations/supabase/client";
+import { getLocalUser } from "@/lib/auth-helpers";
 import { analyzeResume, deleteResume, listAnalyses, listResumes } from "@/lib/resume.functions";
 import { formatSalary } from "@/lib/utils";
 
@@ -121,11 +122,27 @@ function ResumePage() {
 
     setUploading(true);
     try {
-      const { data: userData } = await supabase.auth.getUser();
-      if (!userData.user) throw new Error("Please sign in.");
+      // Try Supabase session first, fall back to local user session
+      let userId: string;
+      let userEmail: string;
+      try {
+        const { data: userData } = await supabase.auth.getUser();
+        if (userData?.user) {
+          userId = userData.user.id;
+          userEmail = userData.user.email ?? "your account";
+        } else {
+          throw new Error("no supabase user");
+        }
+      } catch {
+        const localUser = getLocalUser();
+        if (!localUser) throw new Error("Please sign in to upload your resume.");
+        userId = localUser.id;
+        userEmail = localUser.username || localUser.email || "your account";
+      }
+
       const safeName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, "_");
       const uniqueId = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).substring(2);
-      const path = `${userData.user.id}/${uniqueId}-${safeName}`;
+      const path = `${userId}/${uniqueId}-${safeName}`;
       const { error: upErr } = await supabase.storage
         .from("resumes")
         .upload(path, file, { contentType: file.type || "application/pdf", upsert: false });
@@ -134,7 +151,7 @@ function ResumePage() {
       const { data: inserted, error: insErr } = await supabase
         .from("resumes")
         .insert({
-          user_id: userData.user.id,
+          user_id: userId,
           storage_path: path,
           original_filename: file.name,
           mime_type: file.type || "application/pdf",
@@ -146,7 +163,7 @@ function ResumePage() {
 
       qc.invalidateQueries({ queryKey: ["resumes"] });
       toast.success("Resume saved to your account", {
-        description: `Stored securely for ${userData.user.email ?? "your account"} — analyzing now…`,
+        description: `Stored securely for ${userEmail} — analyzing now…`,
       });
       analyzeM.mutate(inserted.id);
     } catch (e) {

@@ -2,8 +2,10 @@
 export interface LocalUser {
   id: string;
   email: string;
+  username: string;
   user_metadata: {
     full_name?: string;
+    username?: string;
     [key: string]: any;
   };
   created_at: string;
@@ -23,12 +25,15 @@ export function getLocalUser(): LocalUser | null {
   }
 }
 
-export function setLocalUser(email: string, name?: string): LocalUser {
+export function setLocalUser(email: string, name?: string, username?: string): LocalUser {
+  const resolvedUsername = username || email.split("@")[0] || "user";
   const user: LocalUser = {
     id: `usr_${Math.random().toString(36).slice(2, 11)}`,
     email,
+    username: resolvedUsername,
     user_metadata: {
-      full_name: name || email.split("@")[0] || "User",
+      full_name: name || resolvedUsername,
+      username: resolvedUsername,
     },
     created_at: new Date().toISOString(),
   };

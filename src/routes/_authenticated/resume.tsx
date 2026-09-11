@@ -10,7 +10,7 @@ import { Footer } from "@/components/site/Footer";
 import { WorkflowStepper } from "@/components/site/WorkflowStepper";
 import { supabase } from "@/integrations/supabase/client";
 import { getLocalUser } from "@/lib/auth-helpers";
-import { analyzeResume, deleteResume, listAnalyses, listResumes } from "@/lib/resume.functions";
+import { analyzeResume, analyzeResumeLocal, deleteResume, listAnalyses, listResumes } from "@/lib/resume.functions";
 import { formatSalary } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/resume")({
@@ -26,17 +26,42 @@ export const Route = createFileRoute("/_authenticated/resume")({
 function ResumePage() {
   const router = useRouter();
   const qc = useQueryClient();
-  const [targetRole, setTargetRole] = useState("Software Engineer");
+  const [targetRole, setTargetRole] = useState(
+    () => (typeof window !== "undefined" ? localStorage.getItem("target_role") ?? "Software Engineer" : "Software Engineer")
+  );
   const [uploading, setUploading] = useState(false);
+  // Local-user analysis stored in state (mirrors what Supabase-backed users get from DB)
+  const [localAnalysis, setLocalAnalysis] = useState<any>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const raw = localStorage.getItem("latest_resume_analysis");
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+  });
   const fileRef = useRef<HTMLInputElement>(null);
 
   const listResumesFn = useServerFn(listResumes);
   const listAnalysesFn = useServerFn(listAnalyses);
   const analyzeFn = useServerFn(analyzeResume);
+  const analyzeLocalFn = useServerFn(analyzeResumeLocal);
   const deleteFn = useServerFn(deleteResume);
 
-  const resumesQ = useQuery({ queryKey: ["resumes"], queryFn: () => listResumesFn() });
-  const analysesQ = useQuery({ queryKey: ["analyses"], queryFn: () => listAnalysesFn() });
+  // Check if current user is a real Supabase user or a local session user
+  const isLocalUser = (): boolean => {
+    const lu = getLocalUser();
+    if (!lu) return false;
+    // Local users have IDs starting with usr_ (not a UUID)
+    return lu.id.startsWith("usr_");
+  };
+
+  const resumesQ = useQuery({
+    queryKey: ["resumes"],
+    queryFn: () => (isLocalUser() ? Promise.resolve([]) : listResumesFn()),
+  });
+  const analysesQ = useQuery({
+    queryKey: ["analyses"],
+    queryFn: () => (isLocalUser() ? Promise.resolve([]) : listAnalysesFn()),
+  });
 
   const analyzeM = useMutation({
     mutationFn: (resumeId: string) => analyzeFn({ data: { resumeId, targetRole } }),
@@ -66,6 +91,32 @@ function ResumePage() {
       } catch {
         // ignore fallback error
       }
+    },
+  });
+
+  // Local mutation: reads file → sends text to server → stores result in localStorage
+  const analyzeLocalM = useMutation({
+    mutationFn: async ({ file, role }: { file: File; role: string }) => {
+      const arrayBuf = await file.arrayBuffer();
+      const bytes = Array.from(new Uint8Array(arrayBuf));
+      return analyzeLocalFn({ data: { fileBytes: bytes, mimeType: file.type || "application/pdf", filename: file.name, targetRole: role } });
+    },
+    onSuccess: (data) => {
+      if (typeof window !== "undefined") {
+        localStorage.setItem("target_role", targetRole);
+        localStorage.setItem("latest_resume_analysis", JSON.stringify(data));
+      }
+      setLocalAnalysis(data);
+      toast.success("Analysis complete!", {
+        description: "Resume analyzed successfully.",
+        action: {
+          label: "Go to Roadmap ➔",
+          onClick: () => router.navigate({ to: "/roadmap" }),
+        },
+      });
+    },
+    onError: (e) => {
+      toast.error(e instanceof Error ? e.message : "Analysis failed. Please try again.");
     },
   });
 
@@ -100,14 +151,14 @@ function ResumePage() {
 
     // Pre-check for non-resume filenames
     const nonResumeKeywords = [
-      "marksheet", "transcript", "invoice", "receipt", "bill", "certificate", 
-      "admit", "hallticket", "passport", "pan_card", "aadhaar", "assignment", 
+      "marksheet", "transcript", "invoice", "receipt", "bill", "certificate",
+      "admit", "hallticket", "passport", "pan_card", "aadhaar", "assignment",
       "homework", "pay_slip", "payslip", "bank_statement", "offer_letter"
     ];
     const isNonResumeFile = nonResumeKeywords.some((kw) => name.includes(kw));
     if (isNonResumeFile) {
       toast.error("Invalid Document: Not a Resume", {
-        description: "Please upload a candidate Resume or CV document only (marksheets, certificates, and invoices are not allowed).",
+        description: "Please upload a candidate Resume or CV document only.",
       });
       return;
     }
@@ -120,29 +171,25 @@ function ResumePage() {
       return;
     }
 
+    // ── PATH A: Local username session — bypass Supabase storage/DB entirely ──
+    if (isLocalUser()) {
+      toast.info("Analyzing your resume…", { description: "This may take a few seconds." });
+      analyzeLocalM.mutate({ file, role: targetRole });
+      return;
+    }
+
+    // ── PATH B: Real Supabase user — upload to storage & DB as normal ──
     setUploading(true);
     try {
-      // Try Supabase session first, fall back to local user session
-      let userId: string;
-      let userEmail: string;
-      try {
-        const { data: userData } = await supabase.auth.getUser();
-        if (userData?.user) {
-          userId = userData.user.id;
-          userEmail = userData.user.email ?? "your account";
-        } else {
-          throw new Error("no supabase user");
-        }
-      } catch {
-        const localUser = getLocalUser();
-        if (!localUser) throw new Error("Please sign in to upload your resume.");
-        userId = localUser.id;
-        userEmail = localUser.username || localUser.email || "your account";
-      }
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData?.user) throw new Error("Session expired. Please sign in again.");
 
       const safeName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, "_");
-      const uniqueId = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).substring(2);
-      const path = `${userId}/${uniqueId}-${safeName}`;
+      const uniqueId = typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : Date.now().toString(36) + Math.random().toString(36).substring(2);
+      const path = `${userData.user.id}/${uniqueId}-${safeName}`;
+
       const { error: upErr } = await supabase.storage
         .from("resumes")
         .upload(path, file, { contentType: file.type || "application/pdf", upsert: false });
@@ -151,7 +198,7 @@ function ResumePage() {
       const { data: inserted, error: insErr } = await supabase
         .from("resumes")
         .insert({
-          user_id: userId,
+          user_id: userData.user.id,
           storage_path: path,
           original_filename: file.name,
           mime_type: file.type || "application/pdf",
@@ -162,9 +209,7 @@ function ResumePage() {
       if (insErr) throw insErr;
 
       qc.invalidateQueries({ queryKey: ["resumes"] });
-      toast.success("Resume saved to your account", {
-        description: `Stored securely for ${userEmail} — analyzing now…`,
-      });
+      toast.success("Resume saved — analyzing now…");
       analyzeM.mutate(inserted.id);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Upload failed.");
@@ -173,7 +218,9 @@ function ResumePage() {
     }
   }
 
-  const latest = analysesQ.data?.[0];
+  // Show local analysis for username-based users, DB analysis for Supabase users
+  const latest = isLocalUser() ? localAnalysis : (analysesQ.data?.[0] ?? localAnalysis);
+  const isPending = uploading || analyzeM.isPending || analyzeLocalM.isPending;
 
   return (
     <div className="min-h-screen text-foreground overflow-x-hidden">
@@ -215,7 +262,7 @@ function ResumePage() {
             >
               <FileUp className="size-8 mx-auto text-primary-glow" />
               <div className="mt-3 font-medium">
-                {uploading || analyzeM.isPending ? "Working…" : "Drop your resume PDF or click to upload"}
+                {isPending ? "Analyzing…" : "Drop your resume PDF or click to upload"}
               </div>
               <div className="text-xs text-muted-foreground mt-1">PDF up to 10 MB</div>
               <input
@@ -269,7 +316,7 @@ function ResumePage() {
         </div>
       </section>
 
-      {analyzeM.isPending && (
+      {isPending && (
         <section className="px-6 pb-10">
           <div className="mx-auto max-w-5xl glass rounded-3xl p-6 flex items-center gap-3">
             <Loader2 className="size-5 animate-spin text-primary-glow" />
